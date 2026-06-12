@@ -1,0 +1,21 @@
+.env
+
+# ChromaDB vector store (large binary files)
+chroma_db/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
+venv_stable/
+.venv/
+
+# ARGO data files (large, downloaded separately)
+*.nc
+
+# OS files
+.DS_Store
+Thumbs.db

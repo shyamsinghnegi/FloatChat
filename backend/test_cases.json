@@ -1,0 +1,145 @@
+[
+  {
+    "_comment": "── AGGREGATE queries (global, full-table) ────────────────────────────",
+    "question": "How many total profiles are in the database?",
+    "category": "aggregate",
+    "grade_mode": "numeric",
+    "expected_id": null,
+    "expected_value": 42,
+    "tolerance": 0
+  },
+  {
+    "question": "What is the average temperature across all dives?",
+    "category": "aggregate",
+    "grade_mode": "numeric",
+    "expected_id": null,
+    "expected_value": 18.5,
+    "tolerance": 5.0,
+    "_note": "Wide tolerance — we're testing the SQL structure, not the exact value"
+  },
+  {
+    "question": "What is the maximum temperature recorded across the entire dataset?",
+    "category": "aggregate",
+    "grade_mode": "numeric",
+    "expected_id": null,
+    "expected_value": 30.0,
+    "tolerance": 5.0
+  },
+  {
+    "question": "What is the minimum salinity recorded across all profiles?",
+    "category": "aggregate",
+    "grade_mode": "numeric",
+    "expected_id": null,
+    "expected_value": 33.0,
+    "tolerance": 5.0
+  },
+  {
+    "_comment": "── SPECIFIC profile queries ──────────────────────────────────────────",
+    "question": "What is the average surface temperature for profile 2903954_5?",
+    "category": "specific",
+    "grade_mode": "numeric",
+    "expected_id": "2903954_5",
+    "expected_value": 28.5,
+    "tolerance": 3.0
+  },
+  {
+    "question": "What is the average salinity for profile 2903954_10?",
+    "category": "specific",
+    "grade_mode": "numeric",
+    "expected_id": "2903954_10",
+    "expected_value": 35.0,
+    "tolerance": 3.0
+  },
+  {
+    "question": "What is the deepest pressure reading for profile 2903954_1?",
+    "category": "specific",
+    "grade_mode": "numeric",
+    "expected_id": "2903954_1",
+    "expected_value": 1900.0,
+    "tolerance": 200.0
+  },
+  {
+    "_comment": "── SQL STRUCTURE checks — validates query form, not exact values ─────",
+    "question": "Which profile has the highest average salinity?",
+    "category": "ranking",
+    "grade_mode": "sql_check",
+    "expected_id": null,
+    "sql_must_contain": ["GROUP BY", "AVG", "ORDER BY", "LIMIT"]
+  },
+  {
+    "question": "What is the average surface temperature for profile 2903954_5?",
+    "category": "specific",
+    "grade_mode": "sql_check",
+    "expected_id": "2903954_5",
+    "sql_must_contain": ["WHERE", "profile_id", "pressure"]
+  },
+  {
+    "question": "How many total profiles are in the database?",
+    "category": "aggregate",
+    "grade_mode": "sql_check",
+    "expected_id": null,
+    "sql_must_contain": ["COUNT"],
+    "_note": "Global query must NOT filter by profile_id — tests is_global branch"
+  },
+  {
+    "_comment": "── TEXT response checks — non-SQL/conversational queries ─────────────",
+    "question": "What is ARGO float data?",
+    "category": "text",
+    "grade_mode": "text",
+    "expected_id": null,
+    "expected_contains": "argo",
+    "_note": "Tests that the LLM can answer a conceptual question without SQL"
+  },
+  {
+    "question": "What ocean is this data from?",
+    "category": "text",
+    "grade_mode": "text",
+    "expected_id": null,
+    "expected_contains": "indian"
+  },
+  {
+    "_comment": "── SPATIAL queries ────────────────────────────────────────────────────",
+    "question": "Which profile was recorded at the southernmost latitude?",
+    "category": "spatial",
+    "grade_mode": "sql_check",
+    "expected_id": null,
+    "sql_must_contain": ["latitude", "ORDER BY", "LIMIT"]
+  },
+  {
+    "question": "Show me all profiles recorded north of 10 degrees latitude.",
+    "category": "spatial",
+    "grade_mode": "sql_check",
+    "expected_id": null,
+    "sql_must_contain": ["latitude", "WHERE"]
+  },
+  {
+    "_comment": "── TEMPORAL queries ───────────────────────────────────────────────────",
+    "question": "How many profiles were recorded in 2023?",
+    "category": "temporal",
+    "grade_mode": "sql_check",
+    "expected_id": null,
+    "sql_must_contain": ["record_time", "2023"]
+  },
+  {
+    "question": "What was the first profile recorded and when?",
+    "category": "temporal",
+    "grade_mode": "sql_check",
+    "expected_id": null,
+    "sql_must_contain": ["record_time", "ORDER BY", "LIMIT"]
+  },
+  {
+    "_comment": "── DEPTH / PRESSURE queries ───────────────────────────────────────────",
+    "question": "What is the average temperature at 500 decibars across all profiles?",
+    "category": "depth",
+    "grade_mode": "sql_check",
+    "expected_id": null,
+    "sql_must_contain": ["pressure", "AVG"]
+  },
+  {
+    "question": "Show me temperature readings below 1000 decibars for profile 2903954_3.",
+    "category": "depth",
+    "grade_mode": "sql_check",
+    "expected_id": "2903954_3",
+    "sql_must_contain": ["pressure", "WHERE", "profile_id"]
+  }
+]

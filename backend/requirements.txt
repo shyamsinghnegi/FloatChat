@@ -1,0 +1,28 @@
+# FloatChat Backend — Cleaned Requirements
+
+# Web framework
+fastapi
+uvicorn[standard]
+
+# Database
+sqlalchemy
+psycopg2-binary
+
+# Data processing
+xarray
+pandas
+numpy
+netCDF4
+
+# Vector store + embeddings
+chromadb
+sentence-transformers
+
+# LLM
+langchain-community
+langchain-ollama
+ollama
+
+# Utilities
+python-dotenv
+pydantic
