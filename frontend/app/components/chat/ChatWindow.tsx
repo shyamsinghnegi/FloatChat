@@ -112,7 +112,7 @@ export default function ChatWindow() {
     setMessages(prev => [...prev, { id: asstId, role: 'assistant', content: '' }]);
 
     try {
-      const res = await fetch('http://127.0.0.1:8000/query', {
+      const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

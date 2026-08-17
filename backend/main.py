@@ -12,7 +12,7 @@ from pydantic import BaseModel
 import sqlalchemy as sa
 from sqlalchemy import text
 
-from config import DATABASE_URL, DB_POOL_SIZE, DB_MAX_OVERFLOW, DB_POOL_RECYCLE
+from config import DATABASE_URL, DB_POOL_SIZE, DB_MAX_OVERFLOW, DB_POOL_RECYCLE, ALLOWED_ORIGINS
 from chat_with_data import hybrid_query, hybrid_query_stream
 
 logging.basicConfig(level=logging.INFO)
@@ -22,8 +22,8 @@ app = FastAPI(title="FloatChat API", version="2.2.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=ALLOWED_ORIGINS != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -2,6 +2,9 @@
 
 export const dynamic = 'force-dynamic';
 
+// Falls back to 127.0.0.1 (not localhost) to avoid the Node IPv6 localhost bug
+const BACKEND_URL = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+
 export async function GET(
   request: Request,
   // 1. Update the type to indicate params is a Promise
@@ -12,8 +15,8 @@ export async function GET(
     const resolvedParams = await params;
     const profileId = resolvedParams.id;
 
-    // 3. Use the unwrapped ID (and ensure we use 127.0.0.1)
-    const response = await fetch(`http://127.0.0.1:8000/profile/${profileId}`, {
+    // 3. Use the unwrapped ID
+    const response = await fetch(`${BACKEND_URL}/profile/${profileId}`, {
       cache: 'no-store'
     });
     
