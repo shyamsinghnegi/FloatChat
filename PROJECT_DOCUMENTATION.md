@@ -46,8 +46,6 @@ ARGO NetCDF File (.nc)
 │    - GET  /stats        → Summary statistics      │
 │    - POST /eval         → Run test suite          │
 │                                                   │
-│  [app.py] Streamlit (Port 8501) — legacy UI       │
-│                                                   │
 │  [chat_with_data.py] — Core RAG engine            │
 │    hybrid_query() function                        │
 └───────────────────────────────────────────────────┘
@@ -72,16 +70,14 @@ ARGO NetCDF File (.nc)
 | Component | Technology |
 |-----------|-----------|
 | Web framework | FastAPI 0.x + Uvicorn |
-| Legacy UI | Streamlit |
 | Database | PostgreSQL |
 | ORM/query | SQLAlchemy (raw `text()` queries, no ORM models) |
 | Vector store | ChromaDB (persistent, local) |
 | Embeddings | SentenceTransformers `all-MiniLM-L6-v2` |
-| LLM | Ollama — `llama3.2` (local, default configurable) |
-| LLM bridge | LangChain (`langchain-community`, `langchain-ollama`) |
+| LLM | Google Gemini — `gemini-2.0-flash` (hosted, free tier) |
+| LLM bridge | LangChain (`langchain-community`, `langchain-google-genai`) |
 | Data parsing | xarray, netCDF4, pandas, numpy |
 | Config | python-dotenv |
-| Visualization (legacy) | Plotly, Folium, streamlit-folium |
 
 ### Frontend
 | Component | Technology |
@@ -97,9 +93,12 @@ ARGO NetCDF File (.nc)
 ### Infrastructure
 | Component | Technology |
 |-----------|-----------|
-| LLM runtime | Ollama (must run locally) |
-| Database | PostgreSQL (local or remote) |
+| LLM runtime | Google Gemini API (hosted, free tier) |
+| Database | PostgreSQL — Neon (free tier) in production |
 | Vector DB | ChromaDB (file-based, stored at `./chroma_db`) |
+| Backend host | Render (free web service) |
+| Frontend host | Vercel (free tier) |
+| Data refresh | GitHub Actions (daily cron) |
 
 ---
 
@@ -188,8 +187,11 @@ CREATE INDEX idx_profiles_record_time ON argo_profiles (record_time);
 
 ### Step 4: Database Migration (`migrate_db.py`)
 - Idempotent migration script that adds columns, indexes, and new tables without data loss
-- 8 migrations: adds `float_id`/`cycle_number` columns, performance indexes, data quality CHECK constraints, `chat_sessions` table, `chat_messages` table
+- 9 migrations: adds `float_id`/`cycle_number` columns, performance indexes, data quality CHECK constraints, `chat_sessions` table, `chat_messages` table, `float_sync_state` table
 - **Run**: `python migrate_db.py [--dry-run]`
+
+### Step 5: Daily Sync (`sync_floats.py`)
+See [§8 Data Refresh Pipeline](#8-data-refresh-pipeline) below.
 
 ---
 
@@ -202,7 +204,7 @@ This is the heart of the system. It takes a natural language question and return
 1. **Global query detection**: checks if the question contains keywords like "total", "all profiles", "highest", "minimum", etc. — if yes, skips vector search (no profile-specific context needed)
 2. **Vector search** (if not global): queries ChromaDB for up to 5–10 semantically similar profiles; returns their `profile_id`s as hints for the LLM
 3. **Conversation history**: includes the last 4 turns of chat history in the prompt for follow-up question support
-4. **LLM prompt construction**: sends a structured prompt to Ollama containing:
+4. **LLM prompt construction**: sends a structured prompt to Gemini containing:
    - Full database schema with data type notes
    - Few-shot SQL examples
    - Strict rules (e.g., never use BETWEEN on `profile_id`, use `cycle_number` for ranges)
@@ -219,7 +221,7 @@ This is the heart of the system. It takes a natural language question and return
 - Default: returns result only
 
 ### Key Design Decisions
-- **Lazy initialization**: ChromaDB client, SQLDatabase, and Ollama LLM are all initialized on first use, not at module import time
+- **Lazy initialization**: ChromaDB client, SQLDatabase, and the Gemini LLM client are all initialized on first use, not at module import time
 - **Schema-aware few-shot examples**: examples demonstrate the `profile_id` vs `cycle_number` distinction which is a common LLM failure mode
 - **SQL injection prevention**: all database queries use SQLAlchemy `text()` with bound parameters
 
@@ -270,22 +272,33 @@ Returns: { results: [...], total: number }
 
 ---
 
-## 8. Legacy Streamlit Frontend (`app.py`)
+## 8. Data Refresh Pipeline
 
-A self-contained Streamlit application (alternative to the Next.js frontend).
+The legacy Streamlit frontend (`app.py`) has been removed — Next.js is the sole
+frontend. In its place, the project now includes an automated daily data refresh.
 
-**Layout:**
-- Sidebar: mission stats, quick-query suggestion buttons
-- Header: 4 metric cards (dive count, min/max/avg temperature)
-- Left column: Folium interactive map showing float trajectory with polyline + clickable markers
-- Right column: Chat interface with scrollable history
+### `sync_floats.py`
+Checks a curated list of ~35 INCOIS DAC float IDs (`floats_config.py`) and only
+downloads/ingests the ones whose source file has actually changed:
 
-**Features:**
-- Auto-detects profile IDs in questions/results using regex `\b\d{7}_\d+\b` and auto-renders depth profiles
-- Shows generated SQL in a collapsible expander for transparency
-- Side-by-side temperature + salinity vertical profile charts (Plotly)
-- Session state management via `st.session_state`
-- Cached DB queries with 5-minute TTL (`@st.cache_data(ttl=300)`)
+1. For each tracked float, sends an HTTP `HEAD` request to its `.nc` file URL
+2. Compares `Last-Modified` / `Content-Length` against the `float_sync_state` table
+3. Unchanged floats are skipped — no download, no ingestion
+4. Changed (or first-seen) floats are downloaded and ingested via the same logic
+   as `db_ingest.py` (`ingest_file()`, shared between both scripts)
+5. If any float changed, `vector_ingest.py`'s `rebuild_vector_store()` re-runs to
+   refresh ChromaDB; if nothing changed, the rebuild is skipped
+
+**Run manually**: `python sync_floats.py [--force]`
+
+### Scheduling
+`.github/workflows/daily-argo-sync.yml` runs `sync_floats.py` daily at 03:00 UTC
+via GitHub Actions cron (also triggerable manually via `workflow_dispatch`), using
+`DB_*` and `GEMINI_API_KEY` repository secrets pointed at the production Neon
+database. After a successful run, it pings a Render deploy hook
+(`RENDER_DEPLOY_HOOK_URL` repository variable) so the live backend redeploys and
+regenerates its ChromaDB store — Render's free-tier disk is ephemeral, so
+`chroma_db/` doesn't otherwise persist across restarts.
 
 ---
 
@@ -398,10 +411,12 @@ Results also accessible via `POST /eval` on the FastAPI backend (used by the /ev
 All configuration is centralized in `config.py`. It reads from environment variables and raises a clear error if required keys are missing.
 
 ### Required Environment Variables (`.env`)
+See `backend/.env.example` for the full template.
 ```env
 DB_USER=postgres
 DB_PASSWORD=yourpassword
 DB_NAME=floatchat
+GEMINI_API_KEY=your-gemini-api-key
 
 # Optional (with defaults)
 DB_HOST=localhost
@@ -410,7 +425,8 @@ DB_POOL_SIZE=2
 DB_MAX_OVERFLOW=3
 DB_POOL_RECYCLE=1800
 CHROMA_PATH=./chroma_db
-OLLAMA_MODEL=llama3.2
+GEMINI_MODEL=gemini-2.0-flash
+ALLOWED_ORIGIN=*
 ```
 
 ### Key Config Values
@@ -428,9 +444,8 @@ ARGO_FILL_VALUE = 99990.0  # NetCDF fill value threshold; readings at or above t
 ### Prerequisites
 - Python 3.12+
 - Node.js 20+ / npm
-- PostgreSQL running locally
-- Ollama installed and running (`ollama serve`)
-- Ollama model pulled: `ollama pull llama3.2`
+- PostgreSQL running locally (or a Neon connection string)
+- A free Gemini API key from [aistudio.google.com](https://aistudio.google.com/apikey)
 
 ### Backend Setup
 ```bash
@@ -440,7 +455,7 @@ source venv/bin/activate   # or venv/bin/activate.fish on fish shell
 pip install -r requirements.txt
 
 # Configure environment
-cp .env.example .env       # fill in DB_USER, DB_PASSWORD, DB_NAME
+cp .env.example .env       # fill in DB_USER, DB_PASSWORD, DB_NAME, GEMINI_API_KEY
 
 # Run the data pipeline (one-time)
 python argo_extract.py     # Download sample_argo.nc
@@ -450,17 +465,39 @@ python vector_ingest.py    # Build ChromaDB embeddings
 
 # Start API server
 uvicorn main:app --reload --port 8000
-
-# OR start legacy Streamlit UI
-streamlit run app.py
 ```
 
 ### Frontend Setup
 ```bash
 cd frontend
 npm install
+cp .env.example .env       # BACKEND_URL defaults to http://127.0.0.1:8000
 npm run dev                # Development on http://localhost:3000
 ```
+
+---
+
+## 13a. Deployment (Free Tier)
+
+The stack deploys entirely on free tiers: Vercel (frontend), Render (backend),
+Neon (Postgres), Gemini (LLM). Order matters on first deploy:
+
+1. **Database**: create a free Neon Postgres project, grab its connection details
+2. **Backend (Render)**: create a free web service from the `backend/` directory
+   (config in `backend/render.yaml`); set `DB_*`, `GEMINI_API_KEY`, and
+   `ALLOWED_ORIGIN` (your Vercel domain) as environment variables
+3. **Seed the database**: run `db_ingest.py`, `migrate_db.py`, `vector_ingest.py`
+   once locally against the Neon connection string (or as a Render one-off job)
+4. **Frontend (Vercel)**: import the repo, set root directory to `frontend/`, set
+   `BACKEND_URL` to the Render backend's URL
+5. **Daily sync**: add `DB_*` and `GEMINI_API_KEY` as GitHub Actions repository
+   secrets, and `RENDER_DEPLOY_HOOK_URL` (from the Render service's Settings →
+   Deploy Hook) as a repository variable — see §8 for details
+
+**Known free-tier caveats**: Render's free web service spins down after 15
+minutes idle, so the first request after a period of inactivity takes ~30s to
+wake up. Render's free-tier disk is ephemeral, so ChromaDB is rebuilt on each
+deploy rather than persisted.
 
 ---
 
@@ -479,7 +516,7 @@ npm run dev                # Development on http://localhost:3000
 
 | Decision | Rationale |
 |----------|-----------|
-| Local LLM via Ollama | No API costs, data stays on-premises, required for sensitive oceanographic data |
+| Hosted LLM via Gemini free tier | Ollama can't run on free hosting tiers (no GPU); a hosted API keeps the deployed demo free and responsive |
 | ChromaDB + PostgreSQL hybrid | Vector search handles semantic lookup; SQL handles precise aggregation — neither alone is sufficient |
 | `cycle_number` not array index for profile ID | NetCDF profiles are not always stored in order; array position is meaningless |
 | `ARGO_FILL_VALUE = 99990.0` threshold | ARGO standard fill value is 99999; threshold at 99990 catches all variants |
@@ -487,6 +524,7 @@ npm run dev                # Development on http://localhost:3000
 | `ON CONFLICT DO NOTHING` in ingestion | Makes re-running `db_ingest.py` safe without `--reset` |
 | Self-correction SQL loop | Single retry on execution failure; LLM gets the actual DB error message to self-fix |
 | Few-shot examples in prompt | The `profile_id` vs `cycle_number` distinction is non-obvious; examples prevent the most common SQL error |
+| HTTP HEAD-based change detection in `sync_floats.py` | Avoids re-downloading/re-ingesting ~35 floats daily when most haven't changed; only touches what's new |
 
 ---
 
