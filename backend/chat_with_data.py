@@ -7,7 +7,7 @@ from collections import OrderedDict
 import chromadb
 from chromadb.utils import embedding_functions
 from langchain_community.utilities import SQLDatabase
-from langchain_ollama import OllamaLLM
+from langchain_google_genai import ChatGoogleGenerativeAI
 import sqlalchemy as sa
 from sqlalchemy import text as sa_text
 
@@ -16,7 +16,8 @@ from config import (
     CHROMA_PATH,
     CHROMA_COLLECTION,
     EMBEDDING_MODEL,
-    OLLAMA_MODEL,
+    GEMINI_API_KEY,
+    GEMINI_MODEL,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,8 +52,13 @@ def _get_db():
 def _get_llm():
     global _llm
     if _llm is None:
-        # num_predict caps output length → much faster on low-power hardware
-        _llm = OllamaLLM(model=OLLAMA_MODEL, temperature=0, num_predict=400)
+        # max_output_tokens caps response length → faster, cheaper generations
+        _llm = ChatGoogleGenerativeAI(
+            model=GEMINI_MODEL,
+            temperature=0,
+            max_output_tokens=400,
+            google_api_key=GEMINI_API_KEY,
+        )
     return _llm
 
 def _get_sql_engine():
@@ -247,7 +253,9 @@ async def hybrid_query_stream(
 
     try:
         async for chunk in llm.astream(prompt):
-            full_text += chunk
+            # chat models stream AIMessageChunk objects, not raw strings
+            piece = chunk.content if hasattr(chunk, "content") else chunk
+            full_text += piece
             sql_pos = full_text.find("```sql")
             if sql_pos == -1:
                 # Still in explanation — stream every new character
@@ -262,7 +270,7 @@ async def hybrid_query_stream(
                     sent_up_to = sql_pos
                 # Don't yield SQL block as tokens — it'll come as a "sql" event
     except Exception as e:
-        yield "token", f"The AI model is not responding. Is Ollama running? ({e})"
+        yield "token", f"The AI model is not responding right now. ({e})"
         return
 
     clean_sql, explanation = _parse_llm_response(full_text)
@@ -286,8 +294,8 @@ async def hybrid_query_stream(
         yield "status", "Fixing query…"
         correction_prompt = _build_correction_prompt(clean_sql, str(first_err))
         try:
-            corrected_raw = await loop.run_in_executor(None, lambda: _get_llm().invoke(correction_prompt))
-            corrected_sql, _ = _parse_llm_response(corrected_raw)
+            corrected_msg = await loop.run_in_executor(None, lambda: _get_llm().invoke(correction_prompt))
+            corrected_sql, _ = _parse_llm_response(corrected_msg.content)
             if not corrected_sql:
                 raise ValueError("No corrected SQL found in response")
             columns, rows = await loop.run_in_executor(None, lambda: _execute_with_columns(corrected_sql))
@@ -333,9 +341,9 @@ def hybrid_query(
     prompt = _build_prompt(user_question, chat_history, ids_found)
 
     try:
-        raw_response = _get_llm().invoke(prompt)
+        raw_response = _get_llm().invoke(prompt).content
     except Exception as e:
-        err = "The AI model is not responding. Is Ollama running?"
+        err = "The AI model is not responding right now."
         if return_text and return_meta: return err, "", err
         if return_meta: return err, ""
         return err
@@ -356,7 +364,7 @@ def hybrid_query(
             if attempt == 0:
                 logger.warning(f"SQL failed, self-correcting: {e}")
                 try:
-                    corr_raw = _get_llm().invoke(_build_correction_prompt(clean_sql, str(e)))
+                    corr_raw = _get_llm().invoke(_build_correction_prompt(clean_sql, str(e))).content
                     clean_sql, _ = _parse_llm_response(corr_raw)
                 except Exception:
                     pass

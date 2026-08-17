@@ -20,9 +20,9 @@ sentence-transformers
 
 # LLM
 langchain-community
-langchain-ollama
-ollama
+langchain-google-genai
 
 # Utilities
 python-dotenv
 pydantic
+requests

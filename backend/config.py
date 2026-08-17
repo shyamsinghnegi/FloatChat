@@ -45,7 +45,8 @@ EMBEDDING_MODEL   = "all-MiniLM-L6-v2"
 
 
 # ── LLM ───────────────────────────────────────────────────────────────────────
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
+GEMINI_API_KEY = _require("GEMINI_API_KEY")
+GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 
 
 # ── ARGO Data ─────────────────────────────────────────────────────────────────
@@ -53,3 +54,9 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
 # Any reading at or above this threshold must be filtered out before
 # storing to DB or plotting — otherwise you get 99999°C on your charts.
 ARGO_FILL_VALUE = 99990.0
+
+
+# ── CORS ──────────────────────────────────────────────────────────────────────
+# Comma-separated list of allowed frontend origins in production
+# (e.g. "https://floatchat.vercel.app"). Defaults to "*" for local dev.
+ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGIN", "*").split(",")]
