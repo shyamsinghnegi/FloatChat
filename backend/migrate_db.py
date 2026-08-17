@@ -77,7 +77,7 @@ with engine.begin() as conn:
     """, "Create chat_sessions table")
 
     # ── Migration 8: Chat Messages ───────────────────────────────────────────
-    print("\n[8/8] Chat Messages Table")
+    print("\n[8/9] Chat Messages Table")
     run(conn, """
         CREATE TABLE IF NOT EXISTS chat_messages (
             id SERIAL PRIMARY KEY,
@@ -90,5 +90,16 @@ with engine.begin() as conn:
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )
     """, "Create chat_messages table")
+
+    # ── Migration 9: Float Sync State ────────────────────────────────────────
+    print("\n[9/9] Float Sync State Table")
+    run(conn, """
+        CREATE TABLE IF NOT EXISTS float_sync_state (
+            float_id VARCHAR(50) PRIMARY KEY,
+            last_modified TEXT,
+            content_length BIGINT,
+            last_checked_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+    """, "Create float_sync_state table")
 
 print("\n All migrations complete.")

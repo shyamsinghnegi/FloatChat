@@ -73,9 +73,8 @@ def build_profile_summary(profile: pd.Series, stats: pd.Series) -> str:
     return summary
 
 
-def main():
-    engine = create_engine(DATABASE_URL)
-
+def rebuild_vector_store(engine) -> int:
+    """Rebuild the ChromaDB collection from PostgreSQL. Returns profile count."""
     # ── Load profiles ─────────────────────────────────────────────────────────
     print("Loading profiles from PostgreSQL...")
     df_profiles = pd.read_sql(
@@ -146,7 +145,13 @@ def main():
 
     print(f"\n✅ Success: {len(df_profiles)} profiles indexed in ChromaDB.")
     print(f"   Vector store saved to: {CHROMA_PATH}")
-    print("\nYou can now start the app: streamlit run app.py")
+
+    return len(df_profiles)
+
+
+def main():
+    engine = create_engine(DATABASE_URL)
+    rebuild_vector_store(engine)
 
 
 if __name__ == "__main__":

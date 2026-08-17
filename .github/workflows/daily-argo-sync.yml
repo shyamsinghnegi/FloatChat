@@ -1,0 +1,44 @@
+name: Daily ARGO Data Sync
+
+on:
+  schedule:
+    # 03:00 UTC daily
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Re-ingest all tracked floats, even if unchanged'
+        type: boolean
+        default: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run float sync
+        env:
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          # required by config.py's import-time validation, unused otherwise
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          python sync_floats.py ${{ inputs.force == 'true' && '--force' || '' }}
+
+      - name: Trigger Render redeploy
+        if: ${{ vars.RENDER_DEPLOY_HOOK_URL != '' }}
+        run: curl -fsS -X POST "${{ vars.RENDER_DEPLOY_HOOK_URL }}"
