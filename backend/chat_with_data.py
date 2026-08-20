@@ -2,6 +2,7 @@ import re
 import ast
 import asyncio
 import logging
+import random
 from collections import OrderedDict
 
 import chromadb
@@ -19,6 +20,7 @@ from config import (
     GEMINI_API_KEY,
     GEMINI_MODEL,
 )
+from geo import region_for
 
 logger = logging.getLogger(__name__)
 
@@ -114,9 +116,23 @@ JOIN argo_profiles p ON r.profile_id = p.profile_id
 WHERE p.cycle_number BETWEEN 5 AND 15
 ```
 
-Q: Hello!
-A: Hello! I'm FloatChat. Ask me anything about ARGO float data — temperatures, salinity, depth profiles, or trajectories.
+Q: Which floats are in the Bay of Bengal?
+A: Bay of Bengal floats have latitude >= 5 and longitude >= 78.
+```sql
+SELECT DISTINCT float_id FROM argo_profiles WHERE latitude >= 5 AND longitude >= 78
+```
+
+Q: Hello, what can you help me with today?
+A: Hey there! I'm here to help you explore ARGO ocean float data. What would you like to know?
 """
+
+# Same region boundaries as geo.region_for(), expressed as SQL predicates the
+# LLM can use directly instead of guessing at region names.
+REGION_BOUNDARIES = """REGIONS (derived from latitude/longitude, not stored as a column):
+  Bay of Bengal: latitude >= 5 AND longitude >= 78
+  Arabian Sea: latitude >= 5 AND longitude < 78
+  Southern Indian Ocean: latitude <= -5
+  Equatorial Indian Ocean: latitude > -5 AND latitude < 5"""
 
 GLOBAL_KEYWORDS = [
     "total", "all profiles", "average of all", "across all",
@@ -127,6 +143,24 @@ GLOBAL_KEYWORDS = [
 def _is_global_query(question: str) -> bool:
     q = question.lower()
     return any(kw in q for kw in GLOBAL_KEYWORDS)
+
+
+GREETING_PATTERNS = [
+    "hi", "hi there", "hello", "hello there", "hey", "hey there",
+    "yo", "sup", "howdy", "good morning", "good afternoon", "good evening",
+]
+
+GREETING_REPLIES = [
+    "Hey! I'm here to help you explore ARGO ocean float data. What would you like to know?",
+    "Hello! Ask me about float temperatures, salinity, dive profiles, or ocean regions.",
+    "Hi there! I can look up anything in the ARGO float database. What are you curious about?",
+    "Hey, glad you're here! Try asking about a specific float, region, or measurement.",
+    "Hello! I'm ready when you are. Ask about temperature, salinity, depth, or a specific float.",
+]
+
+def _is_greeting(question: str) -> bool:
+    q = question.lower().strip().rstrip("!.?")
+    return q in GREETING_PATTERNS
 
 
 def _build_prompt(user_question: str, chat_history: list[dict], ids_found: list[str]) -> str:
@@ -144,9 +178,13 @@ DATABASE SCHEMA:
   argo_profiles: profile_id (VARCHAR e.g. '2903954_10'), float_id (VARCHAR), cycle_number (INTEGER), latitude (FLOAT), longitude (FLOAT), record_time (TIMESTAMP)
   argo_readings: id (SERIAL), profile_id (VARCHAR FK), pressure (FLOAT dbar), temperature (FLOAT), salinity (FLOAT)
 
+{REGION_BOUNDARIES}
+
 RULES:
 - Give a brief natural-language explanation, then SQL in a ```sql ... ``` block.
 - NEVER use BETWEEN/>/< on profile_id. Use cycle_number (INTEGER) for numeric ranges.
+- When a question names a region (Bay of Bengal, Arabian Sea, etc.), translate it to the matching lat/lon predicate above.
+- For greetings/small talk, respond warmly in your own words — vary your phrasing each time, don't reuse a fixed script.
 - If no SQL is needed (greeting, general question), reply in plain text only.
 
 {FEW_SHOT_EXAMPLES}{history_text}{hints}
@@ -167,7 +205,51 @@ Fix it. Remember: profile_id is VARCHAR — use cycle_number (INTEGER) for range
 Reply with the corrected SQL in a ```sql ... ``` block."""
 
 
+def _build_answer_prompt(user_question: str, sql: str, columns: list[str], rows: list[list]) -> str:
+    preview_rows = rows[:20]
+    truncated = len(rows) > 20
+    table_text = f"Columns: {columns}\nRows: {preview_rows}"
+    if truncated:
+        table_text += f"\n(showing first 20 of {len(rows)} rows)"
+
+    return f"""You are FloatChat, an oceanography tutor helping someone learn to read ARGO float data. \
+They asked a question, SQL ran against the database, and here are the real results. \
+Explain what the results actually mean in plain English — don't just restate the numbers.
+
+{REGION_BOUNDARIES}
+
+RULES:
+- Speak directly to the numbers: state the actual values from the results.
+- Add brief context a beginner would find useful (e.g. what a typical range is, what the region name means, why a value might look the way it does) — one or two sentences, not a lecture.
+- If the result is a single number, lead with it plainly ("The average surface temperature was 28.4°C...").
+- If it's a list/table, summarize the pattern (range, notable high/low, count) rather than listing every row.
+- Never mention SQL, columns, or "the query" — the person only sees your words, not the technical layer.
+- Keep it to 2-4 sentences unless the data genuinely needs more.
+
+QUESTION: {user_question}
+
+SQL THAT RAN: {sql}
+
+RESULTS:
+{table_text}"""
+
+
 # ── SQL / LLM helpers ─────────────────────────────────────────────────────────
+
+def _extract_text(content) -> str:
+    """Normalize a chat model's .content — plain str, or a list of content blocks."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                parts.append(block.get("text", ""))
+        return "".join(parts)
+    return str(content) if content else ""
+
 
 def _parse_llm_response(raw: str) -> tuple[str, str]:
     """Return (clean_sql, explanation_text)."""
@@ -203,16 +285,22 @@ async def hybrid_query_stream(
     chat_history: list[dict] | None = None,
 ):
     """
+    Two LLM passes: one writes the SQL silently, one explains the real
+    results in plain English (streamed to the user as "token" events).
     Async generator yielding (event_type, data) tuples:
-      "status"      → str  (progress label shown in the UI)
-      "token"       → str  (explanation text chunk)
-      "sql"         → str  (SQL query string)
-      "table"       → {"columns": [...], "rows": [[...]]}
-      "result_text" → str  (scalar or error message)
+      "status" → str  (progress label shown in the UI)
+      "token"  → str  (streamed answer text chunk)
+      "sql"    → str  (generated SQL, shown for transparency)
+      "table"  → {"columns": [...], "rows": [[...]]}
     """
     chat_history = chat_history or []
     loop = asyncio.get_event_loop()
     key = _cache_key(user_question)
+
+    # ── Greeting short-circuit: skip the LLM entirely, pick a varied reply ────
+    if _is_greeting(user_question):
+        yield "token", random.choice(GREETING_REPLIES)
+        return
 
     # ── Cache hit: replay stored result without touching the LLM ──────────────
     cached = _cache_get(key)
@@ -223,8 +311,6 @@ async def hybrid_query_stream(
             yield "sql", cached["sql"]
         if cached.get("table"):
             yield "table", cached["table"]
-        elif cached.get("result_text"):
-            yield "result_text", cached["result_text"]
         return
 
     # ── Vector search ─────────────────────────────────────────────────────────
@@ -242,41 +328,23 @@ async def hybrid_query_stream(
         except Exception as e:
             logger.warning(f"Vector search failed: {e}")
 
-    # ── LLM streaming ─────────────────────────────────────────────────────────
-    yield "status", "Generating response…"
+    # ── LLM: write the SQL (not shown to the user — it's a means, not the answer) ──
+    yield "status", "Writing a query…"
 
     prompt = _build_prompt(user_question, chat_history, ids_found)
-    llm = _get_llm()
-
-    full_text = ""
-    sent_up_to = 0  # how many chars have already been yielded as tokens
 
     try:
-        async for chunk in llm.astream(prompt):
-            # chat models stream AIMessageChunk objects, not raw strings
-            piece = chunk.content if hasattr(chunk, "content") else chunk
-            full_text += piece
-            sql_pos = full_text.find("```sql")
-            if sql_pos == -1:
-                # Still in explanation — stream every new character
-                new_part = full_text[sent_up_to:]
-                if new_part:
-                    yield "token", new_part
-                sent_up_to = len(full_text)
-            else:
-                # Yield any explanation text before the SQL block, then stop
-                if sent_up_to < sql_pos:
-                    yield "token", full_text[sent_up_to:sql_pos]
-                    sent_up_to = sql_pos
-                # Don't yield SQL block as tokens — it'll come as a "sql" event
+        raw_msg = await loop.run_in_executor(None, lambda: _get_llm().invoke(prompt))
+        full_text = _extract_text(raw_msg.content)
     except Exception as e:
         yield "token", f"The AI model is not responding right now. ({e})"
         return
 
     clean_sql, explanation = _parse_llm_response(full_text)
 
-    # ── Pure text response (no SQL needed) ────────────────────────────────────
+    # ── Pure text response (no SQL needed, e.g. a greeting) ───────────────────
     if not clean_sql:
+        yield "token", explanation
         _cache_set(key, {"explanation": explanation})
         return
 
@@ -295,7 +363,7 @@ async def hybrid_query_stream(
         correction_prompt = _build_correction_prompt(clean_sql, str(first_err))
         try:
             corrected_msg = await loop.run_in_executor(None, lambda: _get_llm().invoke(correction_prompt))
-            corrected_sql, _ = _parse_llm_response(corrected_msg.content)
+            corrected_sql, _ = _parse_llm_response(_extract_text(corrected_msg.content))
             if not corrected_sql:
                 raise ValueError("No corrected SQL found in response")
             columns, rows = await loop.run_in_executor(None, lambda: _execute_with_columns(corrected_sql))
@@ -308,17 +376,34 @@ async def hybrid_query_stream(
 
     # ── Emit result ───────────────────────────────────────────────────────────
     if not rows:
-        msg = "The query ran successfully but returned no matching data."
-        yield "result_text", msg
-        _cache_set(key, {"explanation": explanation, "sql": clean_sql, "result_text": msg})
+        msg = "That search came back empty. No rows in the database matched what you asked for. Try rephrasing, or check the float ID / date range."
+        yield "token", msg
+        _cache_set(key, {"sql": clean_sql, "explanation": msg})
         return
 
     table = {"columns": columns, "rows": rows}
+
+    # ── Second pass: explain the actual results in plain English ──────────────
+    yield "status", "Thinking about what this means…"
+    answer_prompt = _build_answer_prompt(user_question, clean_sql, columns, rows)
+    answer_text = ""
+    try:
+        async for chunk in _get_llm().astream(answer_prompt):
+            piece = _extract_text(chunk.content) if hasattr(chunk, "content") else chunk
+            answer_text += piece
+            yield "token", piece
+    except Exception as e:
+        fallback = "Here's what the query returned:"
+        yield "token", fallback
+        answer_text = fallback
+        logger.warning(f"Answer generation failed, falling back to raw table: {e}")
+
     yield "table", table
-    _cache_set(key, {"explanation": explanation, "sql": clean_sql, "table": table})
+    _cache_set(key, {"sql": clean_sql, "explanation": answer_text, "table": table})
 
 
-# ── Synchronous wrapper (used by /eval endpoint only) ─────────────────────────
+# ── Synchronous wrapper (used by evaluator.py only — returns the raw scalar
+#    result for grading, not a conversational answer) ──────────────────────────
 
 def hybrid_query(
     user_question: str,
@@ -341,7 +426,7 @@ def hybrid_query(
     prompt = _build_prompt(user_question, chat_history, ids_found)
 
     try:
-        raw_response = _get_llm().invoke(prompt).content
+        raw_response = _extract_text(_get_llm().invoke(prompt).content)
     except Exception as e:
         err = "The AI model is not responding right now."
         if return_text and return_meta: return err, "", err
@@ -364,7 +449,7 @@ def hybrid_query(
             if attempt == 0:
                 logger.warning(f"SQL failed, self-correcting: {e}")
                 try:
-                    corr_raw = _get_llm().invoke(_build_correction_prompt(clean_sql, str(e))).content
+                    corr_raw = _extract_text(_get_llm().invoke(_build_correction_prompt(clean_sql, str(e))).content)
                     clean_sql, _ = _parse_llm_response(corr_raw)
                 except Exception:
                     pass
