@@ -43,10 +43,14 @@ CHROMA_PATH       = os.environ.get("CHROMA_PATH", "./chroma_db")
 CHROMA_COLLECTION = "argo_summaries"
 EMBEDDING_MODEL   = "all-MiniLM-L6-v2"
 
+# Optional — huggingface_hub reads HF_TOKEN from the environment automatically
+# once python-dotenv loads it. Speeds up / de-throttles the one-time embedding
+# model download; not required.
+
 
 # ── LLM ───────────────────────────────────────────────────────────────────────
 GEMINI_API_KEY = _require("GEMINI_API_KEY")
-GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 
 # ── ARGO Data ─────────────────────────────────────────────────────────────────
