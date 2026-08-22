@@ -27,3 +27,9 @@ services:
         value: ./chroma_db
       - key: HF_TOKEN
         sync: false
+      # Forces the HF cache into the project directory, which Render persists
+      # from build into runtime - the default (~/.cache) may not survive that
+      # boundary, which is why the model was still re-downloading per-request
+      # even after the build step ran download_model.py.
+      - key: HF_HOME
+        value: ./.hf_cache
