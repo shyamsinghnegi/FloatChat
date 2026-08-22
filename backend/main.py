@@ -2,8 +2,10 @@ import re
 import json
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 
+import chromadb
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -14,16 +16,43 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from config import DATABASE_URL, DB_POOL_SIZE, DB_MAX_OVERFLOW, DB_POOL_RECYCLE, ALLOWED_ORIGINS
+from config import DATABASE_URL, DB_POOL_SIZE, DB_MAX_OVERFLOW, DB_POOL_RECYCLE, ALLOWED_ORIGINS, CHROMA_PATH, CHROMA_COLLECTION
 from chat_with_data import hybrid_query_stream
 from geo import region_for, region_slug, REGIONS, REGION_BY_SLUG
+from vector_ingest import rebuild_vector_store
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 limiter = Limiter(key_func=get_remote_address)
 
-app = FastAPI(title="FloatChat API", version="2.2.0")
+engine = sa.create_engine(
+    DATABASE_URL,
+    pool_size=DB_POOL_SIZE,
+    max_overflow=DB_MAX_OVERFLOW,
+    pool_recycle=DB_POOL_RECYCLE,
+    pool_pre_ping=True,
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Cloud Run's disk doesn't persist chroma_db/ across cold starts, so rebuild
+    # it from Postgres if the collection is missing - keeps semantic search
+    # working without a manual ingestion step on every fresh deploy.
+    try:
+        chromadb.PersistentClient(path=CHROMA_PATH).get_collection(name=CHROMA_COLLECTION)
+    except Exception:
+        logger.info("ChromaDB collection missing - rebuilding from PostgreSQL...")
+        try:
+            count = rebuild_vector_store(engine)
+            logger.info(f"ChromaDB rebuilt: {count} profiles indexed.")
+        except Exception as e:
+            logger.error(f"ChromaDB rebuild failed: {e}")
+    yield
+
+
+app = FastAPI(title="FloatChat API", version="2.2.0", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -33,14 +62,6 @@ app.add_middleware(
     allow_credentials=ALLOWED_ORIGINS != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
-)
-
-engine = sa.create_engine(
-    DATABASE_URL,
-    pool_size=DB_POOL_SIZE,
-    max_overflow=DB_MAX_OVERFLOW,
-    pool_recycle=DB_POOL_RECYCLE,
-    pool_pre_ping=True,
 )
 
 

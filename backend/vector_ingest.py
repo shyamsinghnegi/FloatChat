@@ -125,22 +125,29 @@ def rebuild_vector_store(engine) -> int:
     # ── Generate and store embeddings ─────────────────────────────────────────
     print(f"\nVectorizing {len(df_profiles)} profiles...")
 
+    documents, metadatas, ids = [], [], []
     for _, row in df_profiles.iterrows():
         stats = stats_by_id.loc[row['profile_id']] if row['profile_id'] in stats_by_id.index else None
+        documents.append(build_profile_summary(row, stats))
+        metadatas.append({
+            "profile_id":   row['profile_id'],
+            "float_id":     str(row.get('float_id', '')),
+            "cycle_number": str(row.get('cycle_number', '')),
+            "date":         str(row['record_time']),
+            "latitude":     str(row['latitude']),
+            "longitude":    str(row['longitude']),
+        })
+        ids.append(row['profile_id'])
 
-        summary = build_profile_summary(row, stats)
-
+    # Batched rather than one collection.add() call per row - embedding each
+    # summary individually left the model doing thousands of size-1 batches,
+    # which made a cold-start rebuild take minutes instead of seconds.
+    BATCH_SIZE = 200
+    for i in range(0, len(documents), BATCH_SIZE):
         collection.add(
-            documents=[summary],
-            metadatas={
-                "profile_id":   row['profile_id'],
-                "float_id":     str(row.get('float_id', '')),
-                "cycle_number": str(row.get('cycle_number', '')),
-                "date":         str(row['record_time']),
-                "latitude":     str(row['latitude']),
-                "longitude":    str(row['longitude']),
-            },
-            ids=[row['profile_id']]
+            documents=documents[i:i + BATCH_SIZE],
+            metadatas=metadatas[i:i + BATCH_SIZE],
+            ids=ids[i:i + BATCH_SIZE],
         )
 
     print(f"\n✅ Success: {len(df_profiles)} profiles indexed in ChromaDB.")

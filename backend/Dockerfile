@@ -15,6 +15,11 @@ ENV HF_HOME=/app/.hf_cache
 COPY download_model.py .
 RUN python download_model.py
 
+# No network calls for model files at runtime - the model is already baked in above,
+# and an HF_HUB_OFFLINE-less run was making per-request HEAD calls to check for
+# updates, adding real latency (and a failure point) to every cold start.
+ENV HF_HUB_OFFLINE=1
+
 COPY . .
 
 # Cloud Run sets $PORT at runtime; default 8080 lets `docker run` work without it
