@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useChat } from '../../context/ChatContext';
 import { getClientId } from '../../lib/clientId';
 import Message from './Message';
@@ -88,6 +88,7 @@ function HomeScreen({ onPrompt }: { onPrompt: (text: string) => void }) {
 export default function ChatWindow() {
   const { messages, setMessages, currentSessionId, setCurrentSessionId, refreshSessions } = useChat();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState('');
@@ -97,7 +98,10 @@ export default function ChatWindow() {
 
   useEffect(() => {
     const q = searchParams.get('q');
-    if (q) setInput(q);
+    if (q) {
+      setInput(q);
+      router.replace('/chat');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

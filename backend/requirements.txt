@@ -1,5 +1,12 @@
 # FloatChat Backend — Cleaned Requirements
 
+# CPU-only torch — sentence-transformers pulls torch in transitively, and on
+# Linux pip defaults to the full CUDA build (adds ~1.5GB+ of unused GPU
+# libraries). Render's free tier has no GPU and only 512MB RAM, so this
+# matters: the CUDA build was pushing the service over its memory limit.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+
 # Web framework
 fastapi
 uvicorn[standard]
