@@ -1,7 +1,7 @@
 'use client';
 
 import { useChat } from '../../context/ChatContext';
-import { MessageSquare, Map, FlaskConical, SquarePen, Trash2, Waves } from 'lucide-react';
+import { MessageSquare, Map, SquarePen, Trash2, Waves } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 
@@ -24,7 +24,6 @@ export default function Sidebar() {
 
   const navItems = [
     { href: '/explore', label: 'Explore Data',    icon: Map },
-    { href: '/eval',    label: 'Eval Suite',       icon: FlaskConical },
   ];
 
   return (
@@ -34,10 +33,10 @@ export default function Sidebar() {
     >
       {/* ── Brand + New chat ─────────────────────── */}
       <div className="flex items-center justify-between px-4 pt-4 pb-2">
-        <div className="flex items-center space-x-2 px-1">
+        <Link href="/" className="flex items-center space-x-2 px-1">
           <Waves className="h-5 w-5" style={{ color: 'var(--accent)' }} />
           <span className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>FloatChat</span>
-        </div>
+        </Link>
         <button
           onClick={handleNew}
           title="New chat"
@@ -124,7 +123,7 @@ export default function Sidebar() {
 
       {/* ── Footer ───────────────────────────────── */}
       <div className="px-4 py-4" style={{ borderTop: '1px solid var(--border)' }}>
-        <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Float WMO 2903954 · Indian Ocean</p>
+        <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>33 ARGO Floats · Indian Ocean</p>
         <div className="flex items-center space-x-1.5 mt-1">
           <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
           <p className="text-[11px] text-emerald-600 font-medium">Systems online</p>

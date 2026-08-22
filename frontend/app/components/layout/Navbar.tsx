@@ -1,21 +1,22 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
+import Link from 'next/link';
 import { ChevronRight, Waves } from 'lucide-react';
 
 const PAGE_META: Record<string, { title: string; subtitle: string }> = {
-  '/':        { title: 'AI Research Assistant',        subtitle: 'Ask anything about the ARGO float dataset' },
-  '/explore': { title: 'Mission Explorer',             subtitle: 'Float trajectory and oceanographic statistics' },
-  '/eval':    { title: 'RAG Accuracy Evaluator',       subtitle: 'Automated test suite for the AI pipeline' },
+  '/':        { title: 'AI Research Assistant',        subtitle: 'Ask anything about the tracked ARGO float dataset' },
+  '/explore': { title: 'Mission Explorer',             subtitle: 'World map and oceanographic statistics' },
 };
 
 export default function Navbar() {
   const pathname = usePathname();
 
   const isProfile = pathname.startsWith('/profile/');
+  const isFloat = pathname.startsWith('/float/');
   const meta = PAGE_META[pathname] ?? {
-    title: isProfile ? 'Depth Profile Analysis' : 'FloatChat',
-    subtitle: isProfile ? 'Temperature and salinity vs pressure' : '',
+    title: isProfile ? 'Depth Profile Analysis' : isFloat ? 'Float History' : 'FloatChat',
+    subtitle: isProfile ? 'Temperature and salinity vs pressure' : isFloat ? 'Dive-by-dive trends for this float' : '',
   };
 
   return (
@@ -23,11 +24,11 @@ export default function Navbar() {
 
       {/* ── Breadcrumb + Title ─────────────────────────── */}
       <div className="flex items-center space-x-3">
-        <div className="flex items-center space-x-1.5 text-slate-400 text-xs font-medium">
-          <Waves className="h-3.5 w-3.5 text-sky-500" />
+        <Link href="/" className="flex items-center space-x-1.5 text-slate-400 text-xs font-medium">
+          <Waves className="h-3.5 w-3.5" style={{ color: 'var(--accent)' }} />
           <span>FloatChat</span>
           <ChevronRight className="h-3 w-3" />
-        </div>
+        </Link>
         <div>
           <h1 className="text-base font-bold text-slate-900 leading-tight">{meta.title}</h1>
           {meta.subtitle && (
@@ -39,8 +40,8 @@ export default function Navbar() {
       {/* ── Right side ────────────────────────────────── */}
       <div className="flex items-center space-x-3">
         <div className="hidden sm:flex flex-col items-end text-right">
-          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Float</span>
-          <span className="text-xs font-mono font-bold text-slate-700">WMO 2903954</span>
+          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Dataset</span>
+          <span className="text-xs font-mono font-bold text-slate-700">33 ARGO Floats</span>
         </div>
         <div className="h-6 w-px bg-slate-200" />
         <div className="flex items-center space-x-1.5 text-xs font-semibold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-200">
