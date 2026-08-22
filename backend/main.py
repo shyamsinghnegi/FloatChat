@@ -61,63 +61,64 @@ def sse_event(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
 
-async def stream_query(question: str, history: list[dict], session_id: str) -> AsyncGenerator[str, None]:
+def _save_assistant_message(session_id: str, full_content: str, sql: str | None, table_data: dict | None, profile_id: str | None) -> None:
     try:
-        full_content = ""
-        sql = None
-        table_data = None
+        with engine.begin() as conn:
+            conn.execute(
+                text("""
+                    INSERT INTO chat_messages (session_id, role, content, sql, table_json, profile_id)
+                    VALUES (:sid, 'assistant', :c, :s, :t, :p)
+                """),
+                {
+                    "sid": session_id,
+                    "c": full_content,
+                    "s": sql,
+                    "t": json.dumps(table_data) if table_data else None,
+                    "p": profile_id,
+                },
+            )
+    except Exception as e:
+        logger.error(f"Save error: {e}")
 
-        async for event_type, data in hybrid_query_stream(question, history):
-            if event_type == "status":
-                yield sse_event({"type": "status", "text": data})
 
-            elif event_type == "token":
-                full_content += data
-                yield sse_event({"type": "token", "text": data})
+async def stream_query(question: str, history: list[dict], session_id: str) -> AsyncGenerator[str, None]:
+    full_content = ""
+    sql = None
+    table_data = None
+    profile_id = None
 
-            elif event_type == "sql":
-                sql = data
-                yield sse_event({"type": "sql", "sql": sql})
-
-            elif event_type == "table":
-                table_data = data  # {"columns": [...], "rows": [[...]]}
-                yield sse_event({"type": "table", "columns": data["columns"], "rows": data["rows"]})
-
-        # Extract a profile_id from table results if present
-        profile_id = None
-        if table_data:
-            for row in table_data.get("rows", []):
-                for cell in row:
-                    m = re.search(r'\b\d{7}_\d+\b', str(cell))
-                    if m:
-                        profile_id = m.group()
-                        break
-                if profile_id:
-                    break
-
-        # Persist to PostgreSQL
+    try:
         try:
-            with engine.connect() as conn:
-                conn.execute(
-                    text("INSERT INTO chat_messages (session_id, role, content) VALUES (:sid, 'user', :c)"),
-                    {"sid": session_id, "c": question},
-                )
-                conn.execute(
-                    text("""
-                        INSERT INTO chat_messages (session_id, role, content, sql, table_json, profile_id)
-                        VALUES (:sid, 'assistant', :c, :s, :t, :p)
-                    """),
-                    {
-                        "sid": session_id,
-                        "c": full_content,
-                        "s": sql,
-                        "t": json.dumps(table_data) if table_data else None,
-                        "p": profile_id,
-                    },
-                )
-                conn.commit()
-        except Exception as e:
-            logger.error(f"Save error: {e}")
+            async for event_type, data in hybrid_query_stream(question, history):
+                if event_type == "status":
+                    yield sse_event({"type": "status", "text": data})
+
+                elif event_type == "token":
+                    full_content += data
+                    yield sse_event({"type": "token", "text": data})
+
+                elif event_type == "sql":
+                    sql = data
+                    yield sse_event({"type": "sql", "sql": sql})
+
+                elif event_type == "table":
+                    table_data = data  # {"columns": [...], "rows": [[...]]}
+                    yield sse_event({"type": "table", "columns": data["columns"], "rows": data["rows"]})
+        finally:
+            # Runs even if the client disconnects mid-stream (GeneratorExit) -
+            # otherwise a dropped connection during streaming (e.g. a slow
+            # cold-start timeout) silently loses the assistant's reply, with
+            # no exception ever logged since GeneratorExit isn't an Exception.
+            if table_data:
+                for row in table_data.get("rows", []):
+                    for cell in row:
+                        m = re.search(r'\b\d{7}_\d+\b', str(cell))
+                        if m:
+                            profile_id = m.group()
+                            break
+                    if profile_id:
+                        break
+            _save_assistant_message(session_id, full_content, sql, table_data, profile_id)
 
         yield sse_event({"type": "done", "profile_id": profile_id, "session_id": session_id})
 
@@ -144,7 +145,16 @@ async def query(request: Request, req: ChatRequest):
                 {"t": title, "cid": req.client_id},
             )
             session_id = str(res.fetchone()[0])
-            conn.commit()
+
+        # Save the user's message now, before streaming starts - a client
+        # disconnect mid-stream would otherwise raise GeneratorExit inside
+        # stream_query and skip its end-of-stream save entirely, silently.
+        conn.execute(
+            text("INSERT INTO chat_messages (session_id, role, content) VALUES (:sid, 'user', :c)"),
+            {"sid": session_id, "c": req.question},
+        )
+        conn.commit()
+
     return StreamingResponse(
         stream_query(req.question, req.history, session_id),
         media_type="text/event-stream",
