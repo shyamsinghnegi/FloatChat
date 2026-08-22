@@ -1,0 +1,4 @@
+# Markdown files are excluded from version control except these
+*.md
+!README.md
+!PROJECT_DOCUMENTATION.md
