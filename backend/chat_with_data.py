@@ -3,6 +3,8 @@ import ast
 import asyncio
 import logging
 import random
+import decimal
+import datetime
 from collections import OrderedDict
 
 import chromadb
@@ -269,12 +271,22 @@ def _parse_llm_response(raw: str) -> tuple[str, str]:
     return "", raw.strip()
 
 
+def _json_safe(value):
+    """datetime/date/Decimal aren't JSON-serializable - stringify them so both
+    the SSE 'table' event and the later chat_messages save can handle any row."""
+    if isinstance(value, (datetime.datetime, datetime.date)):
+        return value.isoformat()
+    if isinstance(value, decimal.Decimal):
+        return float(value)
+    return value
+
+
 def _execute_with_columns(sql: str) -> tuple[list[str], list[list]]:
     """Run SQL once and return (column_names, rows_as_lists)."""
     with _get_sql_engine().connect() as conn:
         cursor = conn.execute(sa_text(sql))
         columns = list(cursor.keys())
-        rows = [list(row) for row in cursor.fetchall()]
+        rows = [[_json_safe(v) for v in row] for row in cursor.fetchall()]
     return columns, rows
 
 

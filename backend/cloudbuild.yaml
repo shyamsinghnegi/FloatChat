@@ -1,16 +1,31 @@
 steps:
+  # Pull the last built image (if any) so unchanged layers - torch, system libs,
+  # the baked-in embedding model - are reused instead of rebuilt from scratch
+  # every time. Without this, every push paid the full ~5min torch install cost
+  # even for a one-line code change.
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - 'docker pull asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/floatchat-api:latest || exit 0'
+
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
+      - '--cache-from'
+      - 'asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/floatchat-api:latest'
       - '-t'
       - 'asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/floatchat-api:$SHORT_SHA'
+      - '-t'
+      - 'asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/floatchat-api:latest'
       - '.'
     dir: 'backend'
 
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - 'asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/floatchat-api:$SHORT_SHA'
+      - '--all-tags'
+      - 'asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/floatchat-api'
 
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
@@ -23,6 +38,7 @@ steps:
 
 images:
   - 'asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/floatchat-api:$SHORT_SHA'
+  - 'asia-south1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/floatchat-api:latest'
 
 options:
   logging: CLOUD_LOGGING_ONLY

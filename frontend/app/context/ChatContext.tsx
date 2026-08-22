@@ -164,10 +164,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
           if (data.type === 'status') { patchChat(activeKey, { loadingStatus: data.text }); continue; }
 
-          if (data.type === 'done') {
-            patchChat(activeKey, { loadingStatus: '' });
+          if (data.type === 'session') {
+            // Sent as soon as the backend creates the session row - rename the temp
+            // key immediately so Recent picks it up without waiting for the reply
+            // to finish streaming (a page refresh before "done" used to lose the
+            // session from view entirely, even though it already existed in Postgres).
             if (data.session_id && isTemp) {
-              // Swap the temporary key for the real backend session_id.
               const oldKey = activeKey;
               setChats(prev => {
                 const { [oldKey]: chatState, ...rest } = prev;
@@ -179,6 +181,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               activeKey = data.session_id;
               refreshSessions();
             }
+            continue;
+          }
+
+          if (data.type === 'done') {
+            patchChat(activeKey, { loadingStatus: '' });
             if (data.profile_id) {
               updateMessages(activeKey, msgs => msgs.map(m => m.id === asstId ? { ...m, profileId: data.profile_id } : m));
             }

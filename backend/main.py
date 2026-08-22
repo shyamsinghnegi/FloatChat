@@ -109,6 +109,11 @@ async def stream_query(question: str, history: list[dict], session_id: str) -> A
     profile_id = None
 
     try:
+        # Sent immediately, before any LLM/DB work - the session row already exists
+        # in Postgres by this point (created in /query), so the frontend can add it
+        # to Recent right away instead of waiting for the full reply to finish.
+        yield sse_event({"type": "session", "session_id": session_id})
+
         try:
             async for event_type, data in hybrid_query_stream(question, history):
                 if event_type == "status":
