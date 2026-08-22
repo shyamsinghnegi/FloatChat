@@ -1,24 +1,31 @@
 import re
 import json
-import asyncio
 import logging
 import uuid
 from typing import AsyncGenerator, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import sqlalchemy as sa
 from sqlalchemy import text
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from config import DATABASE_URL, DB_POOL_SIZE, DB_MAX_OVERFLOW, DB_POOL_RECYCLE, ALLOWED_ORIGINS
-from chat_with_data import hybrid_query, hybrid_query_stream
+from chat_with_data import hybrid_query_stream
+from geo import region_for, region_slug, REGIONS, REGION_BY_SLUG
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(title="FloatChat API", version="2.2.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,13 +43,19 @@ engine = sa.create_engine(
     pool_pre_ping=True,
 )
 
+
+def float_number_map(conn) -> dict[str, int]:
+    """float_id -> stable sequential number, ordered by earliest record_time."""
+    rows = conn.execute(text(
+        "SELECT float_id FROM argo_profiles GROUP BY float_id ORDER BY MIN(record_time) ASC"
+    )).fetchall()
+    return {r[0]: i + 1 for i, r in enumerate(rows)}
+
 class ChatRequest(BaseModel):
     question: str
     history: list[dict] = []
     session_id: Optional[str] = None
-
-class EvalRequest(BaseModel):
-    file_path: str = "test_cases.json"
+    client_id: str
 
 def sse_event(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
@@ -69,11 +82,6 @@ async def stream_query(question: str, history: list[dict], session_id: str) -> A
             elif event_type == "table":
                 table_data = data  # {"columns": [...], "rows": [[...]]}
                 yield sse_event({"type": "table", "columns": data["columns"], "rows": data["rows"]})
-
-            elif event_type == "result_text":
-                txt = f"\n\n**Result:** {data}"
-                full_content += txt
-                yield sse_event({"type": "token", "text": txt})
 
         # Extract a profile_id from table results if present
         profile_id = None
@@ -118,12 +126,23 @@ async def stream_query(question: str, history: list[dict], session_id: str) -> A
 
 
 @app.post("/query")
-async def query(req: ChatRequest):
+@limiter.limit("50/minute")
+async def query(request: Request, req: ChatRequest):
     session_id = req.session_id
-    if not session_id:
-        with engine.connect() as conn:
+    with engine.connect() as conn:
+        if session_id:
+            # Only resume a session that actually belongs to this client.
+            owner = conn.execute(
+                text("SELECT client_id FROM chat_sessions WHERE id = :sid"), {"sid": session_id}
+            ).fetchone()
+            if not owner or owner[0] != req.client_id:
+                raise HTTPException(status_code=403, detail="Session does not belong to this client.")
+        else:
             title = req.question[:40] + "…"
-            res = conn.execute(text("INSERT INTO chat_sessions (title) VALUES (:t) RETURNING id"), {"t": title})
+            res = conn.execute(
+                text("INSERT INTO chat_sessions (title, client_id) VALUES (:t, :cid) RETURNING id"),
+                {"t": title, "cid": req.client_id},
+            )
             session_id = str(res.fetchone()[0])
             conn.commit()
     return StreamingResponse(
@@ -133,64 +152,39 @@ async def query(req: ChatRequest):
 
 
 # ── Session history ───────────────────────────────────────────────────────────
+# No login system — sessions are scoped to an anonymous client_id generated
+# and stored in the browser, so different visitors don't see each other's chats.
 
 @app.get("/sessions")
-def list_sessions():
+def list_sessions(client_id: str):
     with engine.connect() as conn:
         rows = conn.execute(text(
-            "SELECT id, title, created_at FROM chat_sessions ORDER BY created_at DESC"
-        )).fetchall()
+            "SELECT id, title, created_at FROM chat_sessions WHERE client_id = :cid ORDER BY created_at DESC"
+        ), {"cid": client_id}).fetchall()
         return [{"id": str(r[0]), "title": r[1], "date": r[2].isoformat()} for r in rows]
 
 @app.get("/sessions/{session_id}")
-def get_session(session_id: str):
+def get_session(session_id: str, client_id: str):
     with engine.connect() as conn:
+        owner = conn.execute(
+            text("SELECT client_id FROM chat_sessions WHERE id = :sid"), {"sid": session_id}
+        ).fetchone()
+        if not owner or owner[0] != client_id:
+            raise HTTPException(status_code=404)
         rows = conn.execute(text(
             "SELECT role, content, sql, table_json, profile_id FROM chat_messages WHERE session_id = :sid ORDER BY created_at ASC"
         ), {"sid": session_id}).fetchall()
         return [{"role": r[0], "content": r[1], "sql": r[2], "table": r[3], "profileId": r[4]} for r in rows]
 
 @app.delete("/sessions/{session_id}")
-def delete_session(session_id: str):
+def delete_session(session_id: str, client_id: str):
     with engine.connect() as conn:
-        conn.execute(text("DELETE FROM chat_sessions WHERE id = :sid"), {"sid": session_id})
+        conn.execute(
+            text("DELETE FROM chat_sessions WHERE id = :sid AND client_id = :cid"),
+            {"sid": session_id, "cid": client_id},
+        )
         conn.commit()
     return {"status": "ok"}
-
-
-# ── Evaluation suite ──────────────────────────────────────────────────────────
-
-@app.post("/eval")
-async def run_eval(req: EvalRequest):
-    import time
-    from pathlib import Path
-    path = Path(req.file_path)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail=f"File {req.file_path} not found.")
-
-    with open(path) as f:
-        tests = json.load(f)
-
-    results = []
-    loop = asyncio.get_event_loop()
-    for test in tests:
-        start = time.perf_counter()
-        try:
-            actual, sql, _ = await loop.run_in_executor(
-                None,
-                lambda t=test: hybrid_query(t["question"], return_meta=True, return_text=True),
-            )
-        except Exception as e:
-            actual, sql = str(e), ""
-        results.append({
-            "question":   test["question"],
-            "category":   test.get("category", "—"),
-            "sql":        sql,
-            "result":     str(actual)[:500],
-            "latency_s":  round(time.perf_counter() - start, 2),
-        })
-
-    return {"results": results, "total": len(results)}
 
 
 # ── Data explorer ─────────────────────────────────────────────────────────────
@@ -199,12 +193,94 @@ async def run_eval(req: EvalRequest):
 def get_profiles():
     with engine.connect() as conn:
         rows = conn.execute(text(
-            "SELECT profile_id, float_id, cycle_number, latitude, longitude, TO_CHAR(record_time, 'YYYY-MM-DD') FROM argo_profiles ORDER BY record_time ASC"
+            "SELECT profile_id, float_id, cycle_number, latitude, longitude, TO_CHAR(record_time, 'YYYY-MM-DD') "
+            "FROM argo_profiles "
+            "WHERE latitude::text != 'NaN' AND longitude::text != 'NaN' "
+            "ORDER BY record_time ASC"
         )).fetchall()
         return {"profiles": [
             {"profile_id": r[0], "float_id": r[1], "cycle_number": r[2], "latitude": r[3], "longitude": r[4], "date": r[5]}
             for r in rows
         ]}
+
+@app.get("/floats")
+def get_floats():
+    with engine.connect() as conn:
+        numbers = float_number_map(conn)
+        rows = conn.execute(text("""
+            SELECT DISTINCT ON (float_id)
+                float_id, profile_id, latitude, longitude, TO_CHAR(record_time, 'YYYY-MM-DD') AS date
+            FROM argo_profiles
+            WHERE latitude::text != 'NaN' AND longitude::text != 'NaN'
+            ORDER BY float_id, record_time DESC
+        """)).fetchall()
+        return {"floats": [
+            {
+                "float_id": r[0], "latest_profile_id": r[1], "latitude": r[2], "longitude": r[3], "latest_date": r[4],
+                "number": numbers.get(r[0]), "region": region_for(r[2], r[3]),
+            }
+            for r in rows
+        ]}
+
+@app.get("/regions")
+def get_regions():
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT DISTINCT ON (float_id) float_id, latitude, longitude
+            FROM argo_profiles
+            WHERE latitude::text != 'NaN' AND longitude::text != 'NaN'
+            ORDER BY float_id, record_time DESC
+        """)).fetchall()
+
+    buckets: dict[str, list[tuple[float, float]]] = {r: [] for r in REGIONS}
+    for _, lat, lon in rows:
+        buckets[region_for(lat, lon)].append((lat, lon))
+
+    regions = []
+    for name, points in buckets.items():
+        if not points:
+            continue
+        avg_lat = sum(p[0] for p in points) / len(points)
+        avg_lon = sum(p[1] for p in points) / len(points)
+        regions.append({
+            "slug": region_slug(name), "name": name,
+            "float_count": len(points), "latitude": avg_lat, "longitude": avg_lon,
+        })
+    return {"regions": regions}
+
+@app.get("/float/{float_id}")
+def get_float(float_id: str):
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT
+                p.profile_id, p.cycle_number, p.latitude, p.longitude,
+                TO_CHAR(p.record_time, 'YYYY-MM-DD') AS date,
+                AVG(CASE WHEN r.pressure < 10 THEN r.temperature END) AS surface_temp,
+                AVG(r.temperature) AS avg_temp,
+                AVG(r.salinity) AS avg_salinity,
+                MAX(r.pressure) AS max_depth
+            FROM argo_profiles p
+            JOIN argo_readings r ON p.profile_id = r.profile_id
+            WHERE p.float_id = :fid
+            GROUP BY p.profile_id, p.cycle_number, p.latitude, p.longitude, p.record_time
+            ORDER BY p.record_time ASC
+        """), {"fid": float_id}).fetchall()
+        if not rows:
+            raise HTTPException(status_code=404)
+        numbers = float_number_map(conn)
+        latest = rows[-1]
+        return {
+            "float_id": float_id,
+            "number": numbers.get(float_id),
+            "region": region_for(latest[2], latest[3]),
+            "dives": [
+                {
+                    "profile_id": r[0], "cycle_number": r[1], "latitude": r[2], "longitude": r[3],
+                    "date": r[4], "surface_temp": r[5], "avg_temp": r[6], "avg_salinity": r[7], "max_depth": r[8],
+                }
+                for r in rows
+            ],
+        }
 
 @app.get("/profile/{profile_id}")
 def get_profile(profile_id: str):
