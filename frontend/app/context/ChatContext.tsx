@@ -140,12 +140,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let done = false;
+      // A chunk can cut a line in half, so incomplete lines carry over to the next read
+      // instead of being parsed (and thrown on) immediately - this used to silently drop
+      // the "done" event on a chunk-boundary race, leaving the session on its temp key.
+      let buffer = '';
 
       while (!done) {
         const { value, done: rDone } = await reader.read();
         done = rDone;
-        if (!value) continue;
-        for (const line of decoder.decode(value).split('\n')) {
+        if (value) buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = done ? '' : lines.pop() ?? '';
+        for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           const data = JSON.parse(line.slice(6));
 
