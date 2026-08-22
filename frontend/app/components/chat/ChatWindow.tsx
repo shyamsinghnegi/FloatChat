@@ -1,9 +1,12 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useChat } from '../../context/ChatContext';
+import { getClientId } from '../../lib/clientId';
 import Message from './Message';
 import ChatInput from './ChatInput';
+import DemoNotice from './DemoNotice';
 import { Waves, Database, Thermometer, Droplets, Navigation, Activity } from 'lucide-react';
 
 /* ─── Home screen ─────────────────────────────────────────────── */
@@ -47,7 +50,7 @@ function HomeScreen({ onPrompt }: { onPrompt: (text: string) => void }) {
       <div className="text-center mb-10">
         <div
           className="h-14 w-14 rounded-2xl flex items-center justify-center mx-auto mb-5"
-          style={{ background: 'linear-gradient(135deg,#0ea5e9,#0284c7)' }}
+          style={{ background: 'linear-gradient(135deg,#c1502e,#a3401f)' }}
         >
           <Waves className="h-7 w-7 text-white" />
         </div>
@@ -55,7 +58,7 @@ function HomeScreen({ onPrompt }: { onPrompt: (text: string) => void }) {
           What can I help with?
         </h1>
         <p className="text-base" style={{ color: 'var(--text-secondary)' }}>
-          Ask anything about ARGO float data — temperatures, salinity, profiles, locations.
+          Ask anything about ARGO float data: temperatures, salinity, profiles, locations.
         </p>
       </div>
 
@@ -84,12 +87,19 @@ function HomeScreen({ onPrompt }: { onPrompt: (text: string) => void }) {
 /* ─── Main ChatWindow ─────────────────────────────────────────── */
 export default function ChatWindow() {
   const { messages, setMessages, currentSessionId, setCurrentSessionId, refreshSessions } = useChat();
+  const searchParams = useSearchParams();
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const hasMessages = messages.length > 0 && messages[0]?.id !== 'welcome';
+
+  useEffect(() => {
+    const q = searchParams.get('q');
+    if (q) setInput(q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -119,6 +129,7 @@ export default function ChatWindow() {
           question,
           history: messages.filter(m => m.id !== 'welcome').map(m => ({ role: m.role, content: m.content })),
           session_id: currentSessionId,
+          client_id: getClientId(),
         }),
       });
 
@@ -146,6 +157,7 @@ export default function ChatWindow() {
             }
             continue;
           }
+          if (data.type === 'token' && data.text) setLoadingStatus('');
           setMessages(prev => prev.map(msg => {
             if (msg.id !== asstId) return msg;
             const u = { ...msg };
@@ -159,7 +171,7 @@ export default function ChatWindow() {
     } catch {
       setMessages(prev => prev.map(m =>
         m.id === asstId
-          ? { ...m, content: 'Connection error — make sure the FastAPI backend is running on port 8000.' }
+          ? { ...m, content: 'Connection error. Make sure the FastAPI backend is running on port 8000.' }
           : m
       ));
     } finally {
@@ -175,6 +187,7 @@ export default function ChatWindow() {
 
   return (
     <div className="flex flex-col h-full">
+      <DemoNotice />
       {!hasMessages ? (
         /* ── Home screen ── */
         <>
@@ -192,12 +205,10 @@ export default function ChatWindow() {
                 {messages.filter(m => m.id !== 'welcome').map(msg => (
                   <Message key={msg.id} msg={msg} />
                 ))}
-                {isLoading && messages[messages.length - 1]?.content === '' && (
-                  <div className="py-4 flex items-center space-x-3 fade-up" style={{ color: 'var(--text-muted)' }}>
-                    <span className="dot" /><span className="dot" /><span className="dot" />
-                    {loadingStatus && (
-                      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{loadingStatus}</span>
-                    )}
+                {isLoading && loadingStatus && (
+                  <div className="py-3 flex items-center space-x-2.5 fade-up">
+                    <span className="thinking-pulse h-1.5 w-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
+                    <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>{loadingStatus}</span>
                   </div>
                 )}
               </div>

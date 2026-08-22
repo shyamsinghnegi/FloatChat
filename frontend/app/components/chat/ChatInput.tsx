@@ -52,7 +52,7 @@ export default function ChatInput({ input, setInput, onSubmit, isLoading }: Chat
                 onClick={() => pick(p)}
                 className="w-full text-left px-3 py-2.5 rounded-xl text-sm transition-colors"
                 style={{ color: 'var(--text-primary)' }}
-                onMouseEnter={e => (e.currentTarget.style.background = '#f5f5f4')}
+                onMouseEnter={e => (e.currentTarget.style.background = '#f2ede4')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               >
                 {p}
@@ -67,16 +67,16 @@ export default function ChatInput({ input, setInput, onSubmit, isLoading }: Chat
         <div
           className="flex items-end rounded-2xl transition-all"
           style={{
-            background: '#f4f4f4',
+            background: 'var(--user-bubble)',
             border: '1px solid transparent',
           }}
           onFocusCapture={e => {
             (e.currentTarget as HTMLElement).style.background = '#fff';
             (e.currentTarget as HTMLElement).style.border = '1px solid var(--border)';
-            (e.currentTarget as HTMLElement).style.boxShadow = '0 0 0 3px rgba(14,165,233,0.1)';
+            (e.currentTarget as HTMLElement).style.boxShadow = '0 0 0 3px rgba(193,80,46,0.12)';
           }}
           onBlurCapture={e => {
-            (e.currentTarget as HTMLElement).style.background = '#f4f4f4';
+            (e.currentTarget as HTMLElement).style.background = 'var(--user-bubble)';
             (e.currentTarget as HTMLElement).style.border = '1px solid transparent';
             (e.currentTarget as HTMLElement).style.boxShadow = 'none';
           }}
@@ -89,7 +89,7 @@ export default function ChatInput({ input, setInput, onSubmit, isLoading }: Chat
             className="self-end mb-2.5 ml-3 p-1.5 rounded-lg transition-colors shrink-0"
             style={{
               color: showPrompts ? 'var(--accent)' : 'var(--text-muted)',
-              background: showPrompts ? '#f0f9ff' : 'transparent',
+              background: showPrompts ? 'var(--accent-soft)' : 'transparent',
             }}
           >
             <Sparkles className="h-4 w-4" />
@@ -122,8 +122,8 @@ export default function ChatInput({ input, setInput, onSubmit, isLoading }: Chat
               disabled={!input.trim() || isLoading}
               className="h-8 w-8 rounded-xl flex items-center justify-center transition-all disabled:opacity-30"
               style={{
-                background: input.trim() && !isLoading ? '#0ea5e9' : '#e5e5e5',
-                color: input.trim() && !isLoading ? '#fff' : '#9ca3af',
+                background: input.trim() && !isLoading ? 'var(--accent)' : 'var(--border)',
+                color: input.trim() && !isLoading ? '#fff' : 'var(--text-muted)',
               }}
             >
               {isLoading
@@ -134,7 +134,7 @@ export default function ChatInput({ input, setInput, onSubmit, isLoading }: Chat
         </div>
 
         <p className="text-center mt-2" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-          FloatChat · Ollama llama3.2 · Indian Ocean · Float 2903954
+          FloatChat · 33 ARGO floats · Indian Ocean
         </p>
       </form>
     </div>

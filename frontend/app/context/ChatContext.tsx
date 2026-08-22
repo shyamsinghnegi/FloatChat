@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { Message } from '../lib/types';
+import { getClientId } from '../lib/clientId';
 
 interface Session {
   id: string;
@@ -31,7 +32,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const refreshSessions = async () => {
     try {
-      const res = await fetch('/api/sessions');
+      const res = await fetch(`/api/sessions?client_id=${getClientId()}`);
       if (res.ok) setSessions(await res.json());
     } catch (e) {}
   };
@@ -47,7 +48,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const loadSession = async (id: string) => {
     try {
-      const res = await fetch(`/api/sessions/${id}`);
+      const res = await fetch(`/api/sessions/${id}?client_id=${getClientId()}`);
       if (res.ok) {
         const data = await res.json();
         setMessages(data.map((m: any, i: number) => ({ ...m, id: `msg-${i}` })));
@@ -57,7 +58,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteSession = async (id: string) => {
-    await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+    await fetch(`/api/sessions/${id}?client_id=${getClientId()}`, { method: 'DELETE' });
     if (currentSessionId === id) createNewSession();
     refreshSessions();
   };
