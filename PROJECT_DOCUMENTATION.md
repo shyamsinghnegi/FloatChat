@@ -74,7 +74,7 @@ ARGO NetCDF File (.nc)
 | ORM/query | SQLAlchemy (raw `text()` queries, no ORM models) |
 | Vector store | ChromaDB (persistent, local) |
 | Embeddings | SentenceTransformers `all-MiniLM-L6-v2` |
-| LLM | Google Gemini — `gemini-2.0-flash` (hosted, free tier) |
+| LLM | Google Gemini — `gemini-3.5-flash-lite` (hosted, free tier) |
 | LLM bridge | LangChain (`langchain-community`, `langchain-google-genai`) |
 | Data parsing | xarray, netCDF4, pandas, numpy |
 | Config | python-dotenv |
@@ -425,7 +425,7 @@ DB_POOL_SIZE=2
 DB_MAX_OVERFLOW=3
 DB_POOL_RECYCLE=1800
 CHROMA_PATH=./chroma_db
-GEMINI_MODEL=gemini-2.0-flash
+GEMINI_MODEL=gemini-3.5-flash-lite
 ALLOWED_ORIGIN=*
 ```
 

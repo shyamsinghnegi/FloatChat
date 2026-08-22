@@ -92,7 +92,7 @@ with engine.begin() as conn:
     """, "Create chat_messages table")
 
     # ── Migration 9: Float Sync State ────────────────────────────────────────
-    print("\n[9/9] Float Sync State Table")
+    print("\n[9/10] Float Sync State Table")
     run(conn, """
         CREATE TABLE IF NOT EXISTS float_sync_state (
             float_id VARCHAR(50) PRIMARY KEY,
@@ -101,5 +101,15 @@ with engine.begin() as conn:
             last_checked_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )
     """, "Create float_sync_state table")
+
+    # ── Migration 10: Chat Session Client Scoping ────────────────────────────
+    # Without a login system, sessions are scoped to an anonymous per-browser
+    # client_id (generated client-side, stored in localStorage) instead of a
+    # real user account, so different visitors don't see each other's chats.
+    print("\n[10/10] Chat Session Client Scoping")
+    if not column_exists(conn, "chat_sessions", "client_id"):
+        run(conn, "ALTER TABLE chat_sessions ADD COLUMN client_id TEXT", "Add client_id")
+    if not index_exists(conn, "idx_sessions_client_id"):
+        run(conn, "CREATE INDEX idx_sessions_client_id ON chat_sessions (client_id)", "Index: client_id")
 
 print("\n All migrations complete.")

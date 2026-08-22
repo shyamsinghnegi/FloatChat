@@ -26,3 +26,4 @@ langchain-google-genai
 python-dotenv
 pydantic
 requests
+slowapi
