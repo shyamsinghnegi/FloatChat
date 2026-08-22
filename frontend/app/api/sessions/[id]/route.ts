@@ -9,7 +9,8 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const response = await fetch(`${BACKEND_URL}/sessions/${id}`, {
+    const clientId = new URL(request.url).searchParams.get('client_id') ?? '';
+    const response = await fetch(`${BACKEND_URL}/sessions/${id}?client_id=${encodeURIComponent(clientId)}`, {
       cache: 'no-store'
     });
 
@@ -31,7 +32,8 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    const response = await fetch(`${BACKEND_URL}/sessions/${id}`, {
+    const clientId = new URL(request.url).searchParams.get('client_id') ?? '';
+    const response = await fetch(`${BACKEND_URL}/sessions/${id}?client_id=${encodeURIComponent(clientId)}`, {
       method: 'DELETE',
     });
 
