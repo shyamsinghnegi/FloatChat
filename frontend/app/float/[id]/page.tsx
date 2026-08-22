@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { fetchFloat, fetchFloats } from '@/app/lib/api';
 import { floatLabel } from '@/app/lib/floatName';
+import { useChat } from '@/app/context/ChatContext';
 import type { FloatData, FloatMeta, FloatDive } from '@/app/lib/types';
 
 const CATEGORIES = [
@@ -72,6 +73,7 @@ function MetricChart({
 export default function FloatPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: floatId } = use(params);
   const router = useRouter();
+  const { askAbout } = useChat();
   const [data, setData] = useState<FloatData | null>(null);
   const [allFloats, setAllFloats] = useState<FloatMeta[]>([]);
   const [selected, setSelected] = useState<CategoryKey[]>(['surface_temp']);
@@ -158,14 +160,17 @@ export default function FloatPage({ params }: { params: Promise<{ id: string }> 
                 ))}
               </select>
             )}
-            <Link
-              href={`/chat?q=${encodeURIComponent(`Tell me about ${label} (WMO ${floatId}). What patterns do you see across its dive history?`)}`}
+            <button
+              onClick={() => {
+                askAbout(`Tell me about ${label} (WMO ${floatId}). What patterns do you see across its dive history?`);
+                router.push('/chat');
+              }}
               className="inline-flex items-center space-x-2 text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors shrink-0"
               style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
             >
               <Sparkles className="h-4 w-4" />
               <span>Ask AI</span>
-            </Link>
+            </button>
           </div>
         </div>
 

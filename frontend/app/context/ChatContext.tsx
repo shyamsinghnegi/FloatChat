@@ -35,6 +35,9 @@ interface ChatContextType {
   deleteSession: (id: string) => Promise<void>;
   refreshSessions: () => Promise<void>;
   sendMessage: (sessionKey: string, text: string) => Promise<void>;
+  pendingQuestion: string | null;
+  askAbout: (text: string) => void;
+  clearPendingQuestion: () => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -46,6 +49,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const abortControllers = useRef<Record<string, AbortController>>({});
+  // Set by "Ask AI about this X" entry points, read once by ChatWindow to
+  // pre-fill the input - kept in state instead of a URL param so the question
+  // text never touches the address bar.
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
 
   const patchChat = (key: string, patch: Partial<ChatState>) => {
     setChats(prev => ({ ...prev, [key]: { ...(prev[key] ?? emptyChat()), ...patch } }));
@@ -208,12 +215,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const askAbout = (text: string) => setPendingQuestion(text);
+  const clearPendingQuestion = () => setPendingQuestion(null);
+
   const chat = (currentSessionId && chats[currentSessionId]) || emptyChat();
 
   return (
     <ChatContext.Provider value={{
       chat, sessions, currentSessionId,
       loadSession, createNewSession, deleteSession, refreshSessions, sendMessage,
+      pendingQuestion, askAbout, clearPendingQuestion,
     }}>
       {children}
     </ChatContext.Provider>

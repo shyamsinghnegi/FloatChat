@@ -1,14 +1,18 @@
 'use client';
 
 import { useState, useEffect, use } from 'react';
+import { useRouter } from 'next/navigation';
 import { Loader2, ArrowLeft, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import DepthProfile from '@/app/components/viz/DepthProfile';
 import { fetchProfile } from '@/app/lib/api';
+import { useChat } from '@/app/context/ChatContext';
 import type { ProfileData } from '@/app/lib/types';
 
 export default function DivePage({ params }: { params: Promise<{ id: string }> }) {
   const { id: profileId } = use(params);
+  const router = useRouter();
+  const { askAbout } = useChat();
   const [data, setData] = useState<ProfileData | null>(null);
   const [error, setError] = useState('');
 
@@ -72,14 +76,17 @@ export default function DivePage({ params }: { params: Promise<{ id: string }> }
             </p>
           </div>
 
-          <Link
-            href={`/chat?q=${encodeURIComponent(`Tell me about dive ${meta.profile_id} from float ${meta.float_id}. What do the temperature and salinity readings show?`)}`}
+          <button
+            onClick={() => {
+              askAbout(`Tell me about dive ${meta.profile_id} from float ${meta.float_id}. What do the temperature and salinity readings show?`);
+              router.push('/chat');
+            }}
             className="inline-flex items-center space-x-2 text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors shrink-0"
             style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
           >
             <Sparkles className="h-4 w-4" />
             <span>Ask AI about this dive</span>
-          </Link>
+          </button>
         </div>
 
         {/* Summary row */}

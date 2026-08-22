@@ -7,6 +7,7 @@ import { Loader2, Sparkles } from 'lucide-react';
 import RegionMap from '@/app/components/viz/RegionMap';
 import { fetchStats, fetchFloats, fetchRegions } from '@/app/lib/api';
 import { floatLabel } from '@/app/lib/floatName';
+import { useChat } from '@/app/context/ChatContext';
 import type { StatData, FloatMeta, RegionMeta } from '@/app/lib/types';
 
 function StatItem({ label, value }: { label: string; value: string | number }) {
@@ -20,6 +21,7 @@ function StatItem({ label, value }: { label: string; value: string | number }) {
 
 export default function ExplorePage() {
   const router = useRouter();
+  const { askAbout } = useChat();
   const [stats, setStats] = useState<StatData | null>(null);
   const [floats, setFloats] = useState<FloatMeta[]>([]);
   const [regions, setRegions] = useState<RegionMeta[]>([]);
@@ -73,14 +75,17 @@ export default function ExplorePage() {
                 <option key={f.float_id} value={f.float_id}>{floatLabel(f.number, f.region)}</option>
               ))}
             </select>
-            <Link
-              href={`/chat?q=${encodeURIComponent('Give me an overview of the ARGO floats tracked in this dataset. What regions are they in and what stands out?')}`}
+            <button
+              onClick={() => {
+                askAbout('Give me an overview of the ARGO floats tracked in this dataset. What regions are they in and what stands out?');
+                router.push('/chat');
+              }}
               className="inline-flex items-center space-x-2 text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors shrink-0"
               style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
             >
               <Sparkles className="h-4 w-4" />
               <span>Ask AI</span>
-            </Link>
+            </button>
           </div>
         </div>
 

@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
 import { useChat } from '../../context/ChatContext';
 import Message from './Message';
 import ChatInput from './ChatInput';
@@ -85,9 +84,7 @@ function HomeScreen({ onPrompt }: { onPrompt: (text: string) => void }) {
 
 /* ─── Main ChatWindow ─────────────────────────────────────────── */
 export default function ChatWindow() {
-  const { chat, currentSessionId, createNewSession, sendMessage } = useChat();
-  const searchParams = useSearchParams();
-  const router = useRouter();
+  const { chat, currentSessionId, createNewSession, sendMessage, pendingQuestion, clearPendingQuestion } = useChat();
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -95,13 +92,11 @@ export default function ChatWindow() {
   const hasMessages = messages.length > 0 && messages[0]?.id !== 'welcome';
 
   useEffect(() => {
-    const q = searchParams.get('q');
-    if (q) {
-      setInput(q);
-      router.replace('/chat');
+    if (pendingQuestion) {
+      setInput(pendingQuestion);
+      clearPendingQuestion();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [pendingQuestion, clearPendingQuestion]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;

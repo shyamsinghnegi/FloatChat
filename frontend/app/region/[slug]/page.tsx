@@ -7,6 +7,7 @@ import { Loader2, ArrowLeft, Sparkles } from 'lucide-react';
 import WorldMap from '@/app/components/viz/WorldMap';
 import { fetchFloats, fetchRegions } from '@/app/lib/api';
 import { floatLabel } from '@/app/lib/floatName';
+import { useChat } from '@/app/context/ChatContext';
 import type { FloatMeta, RegionMeta } from '@/app/lib/types';
 
 function slugify(name: string): string {
@@ -16,6 +17,7 @@ function slugify(name: string): string {
 export default function RegionPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
   const router = useRouter();
+  const { askAbout } = useChat();
   const [allFloats, setAllFloats] = useState<FloatMeta[] | null>(null);
   const [regions, setRegions] = useState<RegionMeta[]>([]);
 
@@ -87,14 +89,17 @@ export default function RegionPage({ params }: { params: Promise<{ slug: string 
                 <option key={f.float_id} value={f.float_id}>{floatLabel(f.number, f.region)}</option>
               ))}
             </select>
-            <Link
-              href={`/chat?q=${encodeURIComponent(`Tell me about the floats in the ${regionName}. What patterns or notable conditions show up across them?`)}`}
+            <button
+              onClick={() => {
+                askAbout(`Tell me about the floats in the ${regionName}. What patterns or notable conditions show up across them?`);
+                router.push('/chat');
+              }}
               className="inline-flex items-center space-x-2 text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors shrink-0"
               style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
             >
               <Sparkles className="h-4 w-4" />
               <span>Ask AI</span>
-            </Link>
+            </button>
           </div>
         </div>
 
