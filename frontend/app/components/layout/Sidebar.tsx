@@ -17,9 +17,9 @@ export default function Sidebar() {
     if (pathname !== '/chat') router.push('/chat');
   };
 
-  const handleSession = async (id: string) => {
+  const handleSession = (id: string) => {
+    loadSession(id);
     if (pathname !== '/chat') router.push('/chat');
-    await loadSession(id);
   };
 
   const navItems = [

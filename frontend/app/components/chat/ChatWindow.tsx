@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useChat } from '../../context/ChatContext';
-import { getClientId } from '../../lib/clientId';
 import Message from './Message';
 import ChatInput from './ChatInput';
 import DemoNotice from './DemoNotice';
@@ -86,14 +85,13 @@ function HomeScreen({ onPrompt }: { onPrompt: (text: string) => void }) {
 
 /* ─── Main ChatWindow ─────────────────────────────────────────── */
 export default function ChatWindow() {
-  const { messages, setMessages, currentSessionId, setCurrentSessionId, refreshSessions } = useChat();
+  const { chat, currentSessionId, createNewSession, sendMessage } = useChat();
   const searchParams = useSearchParams();
   const router = useRouter();
   const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [loadingStatus, setLoadingStatus] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const { messages, isLoading, loadingStatus } = chat;
   const hasMessages = messages.length > 0 && messages[0]?.id !== 'welcome';
 
   useEffect(() => {
@@ -109,79 +107,11 @@ export default function ChatWindow() {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, isLoading]);
 
-  const send = async (text: string) => {
-    const question = text.trim();
-    if (!question || isLoading) return;
-
-    const userMsg = { id: Date.now().toString(), role: 'user' as const, content: question };
-    setMessages(prev => {
-      const filtered = prev.filter(m => m.id !== 'welcome');
-      return [...filtered, userMsg];
-    });
+  const send = (text: string) => {
+    if (!text.trim()) return;
+    const key = currentSessionId ?? createNewSession();
     setInput('');
-    setIsLoading(true);
-    setLoadingStatus('Connecting…');
-
-    const asstId = (Date.now() + 1).toString();
-    setMessages(prev => [...prev, { id: asstId, role: 'assistant', content: '' }]);
-
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question,
-          history: messages.filter(m => m.id !== 'welcome').map(m => ({ role: m.role, content: m.content })),
-          session_id: currentSessionId,
-          client_id: getClientId(),
-        }),
-      });
-
-      if (!res.body) throw new Error('No body');
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let done = false;
-
-      while (!done) {
-        const { value, done: rDone } = await reader.read();
-        done = rDone;
-        if (!value) continue;
-        for (const line of decoder.decode(value).split('\n')) {
-          if (!line.startsWith('data: ')) continue;
-          const data = JSON.parse(line.slice(6));
-          if (data.type === 'status') { setLoadingStatus(data.text); continue; }
-          if (data.type === 'done') {
-            setLoadingStatus('');
-            if (data.session_id && !currentSessionId) {
-              setCurrentSessionId(data.session_id);
-              refreshSessions();
-            }
-            if (data.profile_id) {
-              setMessages(prev => prev.map(m => m.id === asstId ? { ...m, profileId: data.profile_id } : m));
-            }
-            continue;
-          }
-          if (data.type === 'token' && data.text) setLoadingStatus('');
-          setMessages(prev => prev.map(msg => {
-            if (msg.id !== asstId) return msg;
-            const u = { ...msg };
-            if (data.type === 'token') u.content += data.text;
-            if (data.type === 'sql')   u.sql = data.sql;
-            if (data.type === 'table') u.table = { columns: data.columns, rows: data.rows };
-            return u;
-          }));
-        }
-      }
-    } catch {
-      setMessages(prev => prev.map(m =>
-        m.id === asstId
-          ? { ...m, content: 'Connection error. Make sure the FastAPI backend is running on port 8000.' }
-          : m
-      ));
-    } finally {
-      setIsLoading(false);
-      setLoadingStatus('');
-    }
+    sendMessage(key, text);
   };
 
   const handleSubmit = (e: React.SyntheticEvent<HTMLFormElement>) => {
