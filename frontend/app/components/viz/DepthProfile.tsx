@@ -54,7 +54,7 @@ export default function DepthProfile({ data }: Props) {
     >
       <h2 className="text-sm font-semibold mb-6" style={{ color: 'var(--text-primary)' }}>Depth Profiles</h2>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <Chart data={data} dataKey="temperature" color="#0ea5e9" xLabel="Temperature (°C)" />
+        <Chart data={data} dataKey="temperature" color="#c1502e" xLabel="Temperature (°C)" />
         <Chart data={data} dataKey="salinity"    color="#10b981" xLabel="Salinity (PSU)"   />
       </div>
     </div>

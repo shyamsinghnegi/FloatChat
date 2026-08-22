@@ -1,4 +1,4 @@
-import { StatData, ProfileMeta, ProfileData } from './types';
+import { StatData, ProfileMeta, ProfileData, FloatMeta, FloatData, RegionMeta } from './types';
 
 // All requests go through Next.js API Route Proxies, forwarded server-side to BACKEND_URL.
 export async function fetchProfiles(): Promise<{ profiles: ProfileMeta[] }> {
@@ -19,12 +19,20 @@ export async function fetchStats(): Promise<StatData> {
   return res.json();
 }
 
-export async function runEvaluation(): Promise<any> {
-  const res = await fetch('/api/eval', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ file_path: "test_cases.json" })
-  });
-  if (!res.ok) throw new Error('Failed to run evaluation');
+export async function fetchFloats(): Promise<{ floats: FloatMeta[] }> {
+  const res = await fetch('/api/floats');
+  if (!res.ok) throw new Error('Failed to fetch floats');
+  return res.json();
+}
+
+export async function fetchFloat(id: string): Promise<FloatData> {
+  const res = await fetch(`/api/float/${id}`);
+  if (!res.ok) throw new Error(`Failed to fetch float ${id}`);
+  return res.json();
+}
+
+export async function fetchRegions(): Promise<{ regions: RegionMeta[] }> {
+  const res = await fetch('/api/regions');
+  if (!res.ok) throw new Error('Failed to fetch regions');
   return res.json();
 }
